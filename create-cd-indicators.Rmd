@@ -1,0 +1,83 @@
+---
+title: "cd-indicator-creation"
+author: "Kelley Bemis"
+date: "9/6/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(odbc)
+library(DBI)
+library(keyring)
+library(dbplyr)
+
+munis <- read_csv("https://github.com/Cook-County-Department-of-Public-Health/ccdph-data-sets/blob/main/2020/decennial-2020-total-muni.csv?raw=TRUE") %>%
+  filter(district != "OOJ" & exclude_from_analysis == F) %>%
+  mutate(geoid = paste0("17", census_place_code))
+
+#function to censor data
+suppress_count <- function(number_var) { number_var = ifelse(number_var > 0 & number_var < 5, NA, number_var) }
+
+#function to calculate rates
+rate <- function(num, pop, pop_denom, decimals = 1) { round(num/pop*pop_denom, decimals) }
+
+```
+
+## Package CD Indicators for SCC Health Atlas
+
+Collect raw data from PH server
+
+```{r collect-data}
+
+#connect to server
+cd_con <- dbConnect(odbc::odbc(), Driver = "SQL Server", Server = key_get("ph-server"), Database = "cd")
+
+#pull CT and GC for year(s) of interest
+sti_raw <- tbl(cd_con, "sti") %>%
+  filter(year > 2016 & dx_code < 700) %>%
+  collect()
+
+#disconnect from server
+dbDisconnect(cd_con)
+
+```
+
+Create rates by muni, year, and disease (CT or GC)
+
+```{r create-rates}
+
+sti_rates <- sti_raw %>%
+  mutate(topic = ifelse(dx_code < 300, "JG8FXNR", "JG8XQNO")) %>%
+  group_by(year, clean_city, topic) %>%
+  tally() %>%
+  ungroup() %>%
+  right_join(select(munis, municipality, pop_in_cook, geoid), by = c("clean_city" = "municipality")) %>%
+  complete(clean_city, year, topic, fill = list(n = 0)) %>%
+  group_by(clean_city) %>%
+  fill(pop_in_cook, geoid) %>%
+  ungroup() %>%
+  mutate(n = suppress_count(n),
+         rate = rate(n, pop_in_cook, 100000))
+
+```
+
+Format for Metopio upload
+
+```{r format-upload}
+
+metopio_sti <- sti_rates %>%
+  select(geoid, topic, year, rate) %>%
+  pivot_wider(names_from = c(topic, year), values_from = rate, names_sep = "_") %>%
+  drop_na(geoid) %>%
+  mutate(layer = "place") %>%
+  unnest(cols = contains("_"))
+
+write_csv(metopio_sti, "cd/sti_2017-2020.csv")
+
+#Note: remove exported "NA"s manually in CSV before uploading
+
+```
+
