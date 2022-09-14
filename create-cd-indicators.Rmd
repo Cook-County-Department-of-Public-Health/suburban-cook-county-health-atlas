@@ -40,15 +40,23 @@ sti_raw <- tbl(cd_con, "sti") %>%
   filter(year > 2016 & dx_code < 700) %>%
   collect()
 
+##pull syphilis for year(s) of interest
+syph_raw <-  tbl(cd_con, "sti") %>%
+  filter(year > 2017 & dx_code %in% c(710,720)) %>%
+  collect()
+
 #disconnect from server
 dbDisconnect(cd_con)
 
 ```
 
-Create rates by muni, year, and disease (CT or GC)
+Create rates by muni, year, and disease
+
+Note: Syphilis counts too suppressed for 3 year rates, will re-assess at 5 years
 
 ```{r create-rates}
 
+#calculate annual STI rates
 sti_rates <- sti_raw %>%
   mutate(topic = ifelse(dx_code < 300, "JG8FXNR", "JG8XQNO")) %>%
   group_by(year, clean_city, topic) %>%
@@ -62,9 +70,28 @@ sti_rates <- sti_raw %>%
   mutate(n = suppress_count(n),
          rate = rate(n, pop_in_cook, 100000))
 
+#calculate 3-year rates for syphilis (smaller numbers)
+# syphilis_rates <- syph_raw %>%
+#   mutate(period = "2018-2020") %>% #adjust cuts in the future when more data acquired
+#   mutate(topic = "JG8ITHO") %>%
+#   group_by(topic, period, clean_city) %>%
+#   tally() %>%
+#   ungroup() %>%
+#   right_join(select(munis, municipality, pop_in_cook, geoid), by = c("clean_city" = "municipality")) %>%
+#   complete(clean_city, period, topic, fill = list(n = 0)) %>%
+#   group_by(clean_city) %>%
+#   fill(pop_in_cook, geoid, .direction = "downup") %>%
+#   ungroup() %>%
+#   drop_na(period,topic) %>%
+#   mutate(n = suppress_count(n),
+#          rate = rate(n, pop_in_cook, 100000))
+  
+
 ```
 
 Format for Metopio upload
+
+#Note: "NA"s must be removed manually for exported CSVs below before uploading to Metopio platform
 
 ```{r format-upload}
 
@@ -76,6 +103,14 @@ metopio_sti <- sti_rates %>%
   unnest(cols = contains("_"))
 
 write_csv(metopio_sti, "cd/sti_2017-2020.csv")
+
+# metopio_syph <- syphilis_rates %>%
+#   select(geoid, topic, period, rate) %>%
+#   pivot_wider(names_from = c(topic, period), values_from = rate, names_sep = "_") %>%
+#   drop_na(geoid) %>%
+#   mutate(layer = "place") %>%
+#   unnest(cols = contains("_"))
+
 
 #Note: remove exported "NA"s manually in CSV before uploading
 
