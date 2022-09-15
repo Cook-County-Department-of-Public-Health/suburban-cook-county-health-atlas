@@ -116,3 +116,36 @@ write_csv(metopio_sti, "cd/sti_2017-2020.csv")
 
 ```
 
+
+## Package COVID Indicators for SCC Health Atlas
+
+Note: Code below is temporary while datasets stored locally. Incorporate into above chunks when data moved to PH server
+
+```{r covid}
+
+covid_rates <- readRDS(paste0(key_get("local_shiny_path"), "cases.rds")) %>%
+  mutate(year = lubridate::year(combinedReportDate)) %>%
+  filter(year < lubridate::year(Sys.Date())) %>%
+  group_by(year, clean_city) %>%
+  tally() %>%
+  ungroup() %>%
+  right_join(select(munis, municipality, pop_in_cook, geoid), by = c("clean_city" = "municipality")) %>%
+  complete(clean_city, year, fill = list(n = 0)) %>%
+  group_by(clean_city) %>%
+  fill(pop_in_cook, geoid) %>%
+  ungroup() %>%
+  mutate(n = suppress_count(n),
+         rate = rate(n, pop_in_cook, 100000),
+         topic = "JG8YTPN")
+
+metopio_covid <- covid_rates %>%
+  select(geoid, topic, year, rate) %>%
+  pivot_wider(names_from = c(topic, year), values_from = rate, names_sep = "_") %>%
+  drop_na(geoid) %>%
+  mutate(layer = "place") %>%
+  unnest(cols = contains("_"))
+
+write_csv(metopio_covid, "cd/covid_2020-2021.csv")
+
+```
+
